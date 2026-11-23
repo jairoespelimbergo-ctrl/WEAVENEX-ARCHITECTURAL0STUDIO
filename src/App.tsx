@@ -81,12 +81,14 @@ interface SiteCopy {
   walkthroughVideoUrl: string;
 }
 
+const WEAVENEX_MANIFESTO =
+  'WEAVENEX is a diversified and research-based architectural and design firm established in 2024. Founded by our Principal Architect, Architect Joshua De Guzman, and his peers, we are committed to functional planning and design excellence, innovation, and sustainability. We believe that each project is weaved through connection and understanding of its site, its client and its cultural and technological environment.We have a team of dedicated and talented architects and subordinates that thrives through the passion of the craft. Our company works on a wide range of project types from industrial, residential, hospitality, commercial, mixed-use developments, landscape architecture, and interior design.';
+
 const DEFAULT_SITE_COPY: SiteCopy = {
-  firmName: 'Monolith Six',
-  heroKicker: 'Brutalist Architecture Practice · Est. 2012',
+  firmName: 'Weavenex',
+  heroKicker: 'Architectural & Design Studio · Est. 2024',
   heroHeadline: 'Raw concrete. Unyielding form.',
-  heroManifesto:
-    'Monolith Six is a collective of six principal architects dedicated to monumental brutalist structures. We cast honest concrete, weathered steel, and sculptural shadow into civic, cultural, and private architecture built to endure centuries.',
+  heroManifesto: WEAVENEX_MANIFESTO,
   worksTitle: 'Built Monoliths',
   architectsTitle: 'Six Principals. One Discipline.',
   architectsSubtitle:
@@ -130,12 +132,12 @@ function migrateProjects(savedProjects?: ProjectItem[]): ProjectItem[] {
     const def = defaultById.get(proj.id);
     const nextLocation = OLD_LOCATION_TO_PH[proj.location] ?? proj.location;
 
-    // Preserve Mizu no Wa completely except updating its location to Philippines
+    // Preserve Mizu no Wa completely and set its location to Kyoto, Japan
     if (
       proj.id === 'basalt-point-residence' ||
       proj.title.toLowerCase().includes('mizu no wa')
     ) {
-      return { ...proj, location: nextLocation };
+      return { ...proj, location: 'Kyoto, Japan' };
     }
 
     // Upgrade Bendo Group of Companies description if still using old default
@@ -228,6 +230,16 @@ function normalizeArchitects(list?: ArchitectProfile[]): ArchitectProfile[] {
   });
 }
 
+function normalizeMetrics(list?: typeof DEFAULT_METRICS): typeof DEFAULT_METRICS {
+  const source = list?.length ? list : DEFAULT_METRICS;
+  return source.map((m, idx) => {
+    if (idx === 1 || /built/i.test(m.label)) {
+      return { ...m, detail: 'International and Philippine-based projects.' };
+    }
+    return m;
+  });
+}
+
 function loadSavedSiteData(): PersistedSiteData {
   try {
     const raw = localStorage.getItem(SITE_DATA_STORAGE_KEY);
@@ -244,12 +256,15 @@ function loadSavedSiteData(): PersistedSiteData {
     if (!savedCopy.walkthroughVideoUrl?.trim()) {
       savedCopy.walkthroughVideoUrl = DEFAULT_SITE_COPY.walkthroughVideoUrl;
     }
+    if (savedCopy.heroManifesto.includes('established in 2026')) {
+      savedCopy.heroManifesto = WEAVENEX_MANIFESTO;
+    }
     if (savedCopy.studioAddress === '480 Foundry Wharf, Rotterdam · Zurich · Detroit') {
       savedCopy.studioAddress = DEFAULT_SITE_COPY.studioAddress;
     }
     return {
       siteCopy: savedCopy,
-      metrics: parsed.metrics?.length ? parsed.metrics : DEFAULT_METRICS,
+      metrics: normalizeMetrics(parsed.metrics),
       projects: migrateProjects(parsed.projects),
       architects: normalizeArchitects(parsed.architects)
     };
@@ -343,6 +358,21 @@ export default function App() {
     }
   }, [siteCopy, metrics, projects, architects]);
 
+  // Incorporate /weavenex-architectural-studio into the address bar path
+  useEffect(() => {
+    try {
+      if (window.location.pathname === '/' || window.location.pathname === '') {
+        window.history.replaceState(
+          null,
+          '',
+          `/weavenex-architectural-studio${window.location.search}${window.location.hash}`
+        );
+      }
+    } catch {
+      // Ignore history API restrictions
+    }
+  }, []);
+
   // Scroll-linked animations
   const { scrollYProgress } = useScroll();
   const scaleX = useSpring(scrollYProgress, {
@@ -399,9 +429,12 @@ export default function App() {
               if (!mergedCopy.walkthroughVideoUrl?.trim()) {
                 mergedCopy.walkthroughVideoUrl = DEFAULT_SITE_COPY.walkthroughVideoUrl;
               }
+              if (mergedCopy.heroManifesto.includes('established in 2026')) {
+                mergedCopy.heroManifesto = WEAVENEX_MANIFESTO;
+              }
               setSiteCopy(mergedCopy);
             }
-            if (parsed.metrics?.length) setMetrics(parsed.metrics);
+            if (parsed.metrics?.length) setMetrics(normalizeMetrics(parsed.metrics));
             if (parsed.projects?.length) {
               const defaultProjMap = new Map(DEFAULT_PROJECTS.map((p) => [p.id, p]));
               loadedProjects = migrateProjects(parsed.projects).map((proj) => {
@@ -1687,7 +1720,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => {
-                const publicUrl = window.location.origin.replace('ais-dev-', 'ais-pre-');
+                const publicUrl = `${window.location.origin.replace('ais-dev-', 'ais-pre-')}/weavenex-architectural-studio`;
                 navigator.clipboard?.writeText(publicUrl).catch(() => {});
                 setLinkCopied(true);
                 window.setTimeout(() => setLinkCopied(false), 2500);

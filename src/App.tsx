@@ -128,66 +128,67 @@ function migrateProjects(savedProjects?: ProjectItem[]): ProjectItem[] {
 
   const defaultById = new Map(DEFAULT_PROJECTS.map((p) => [p.id, p]));
 
-  const updated = savedProjects.map((proj) => {
+  const updated = savedProjects.map((proj, idx) => {
     const def = defaultById.get(proj.id);
     const nextLocation = OLD_LOCATION_TO_PH[proj.location] ?? proj.location;
+    let result: ProjectItem;
 
     // Preserve Mizu no Wa completely and set its location to Kyoto, Japan
     if (
       proj.id === 'basalt-point-residence' ||
       proj.title.toLowerCase().includes('mizu no wa')
     ) {
-      return { ...proj, location: 'Kyoto, Japan' };
-    }
-
-    // Upgrade Bendo Group of Companies description if still using old default
-    if (proj.id === 'kestrel-civic-citadel' && def) {
+      result = { ...proj, location: 'Kyoto, Japan' };
+    } else if (proj.id === 'kestrel-civic-citadel' && def) {
+      // Upgrade Bendo Group of Companies description if still using old default
       const isOldSummary = proj.summary.startsWith('A fortified public gallery');
-      return {
+      result = {
         ...proj,
         location: nextLocation,
         summary: isOldSummary ? def.summary : proj.summary
       };
-    }
-
-    // Update Solstice Concrete Pavilion & Foundry Research Monolith titles + descriptions
-    if (
+    } else if (
       (proj.id === 'solstice-courtyard-pavilion' || proj.id === 'foundry-command-center') &&
       def
     ) {
+      // Update Solstice Concrete Pavilion & Foundry Research Monolith titles + descriptions
       const isOldTitle =
         proj.title === 'Solstice Concrete Pavilion' || proj.title === 'Foundry Research Monolith';
-      return {
+      result = {
         ...proj,
         title: isOldTitle ? def.title : proj.title,
         location: nextLocation,
         summary: def.summary
       };
-    }
-
-    // Update Cordillera Ridge Monolith & Intramuros Concrete Archive names, descriptions, and remove 3rd photo from Intramuros
-    if (proj.id === 'cordillera-ridge-monolith' && def) {
+    } else if (proj.id === 'cordillera-ridge-monolith' && def) {
+      // Update Cordillera Ridge Monolith & Intramuros Concrete Archive names, descriptions, and remove 3rd photo from Intramuros
       const isOldTitle = proj.title === 'Cordillera Ridge Monolith';
-      return {
+      result = {
         ...proj,
         title: isOldTitle ? def.title : proj.title,
         summary: isOldTitle ? def.summary : proj.summary,
         structuralNotes: isOldTitle ? def.structuralNotes : proj.structuralNotes
       };
-    }
-
-    if (proj.id === 'intramuros-stone-archive' && def) {
+    } else if (proj.id === 'intramuros-stone-archive' && def) {
       const isOldTitle = proj.title === 'Intramuros Concrete Archive';
-      return {
+      result = {
         ...proj,
         title: isOldTitle ? def.title : proj.title,
         summary: isOldTitle ? def.summary : proj.summary,
         structuralNotes: isOldTitle ? def.structuralNotes : proj.structuralNotes,
         shots: proj.shots.length > 2 ? proj.shots.slice(0, 2) : proj.shots
       };
+    } else {
+      result = { ...proj, location: nextLocation };
     }
 
-    return { ...proj, location: nextLocation };
+    if (idx === 0) {
+      return { ...result, location: 'Lake Kawaguchiko, Yamanashi Japan' };
+    }
+    if (idx === 1) {
+      return { ...result, location: 'Tagaytay City, PH' };
+    }
+    return result;
   });
 
   // Ensure all 6 projects exist by appending any new defaults not yet in savedProjects
@@ -218,11 +219,11 @@ const DEFAULT_PERSPECTIVE_MEDIA: UploadedMediaState = {
 function normalizeArchitects(list?: ArchitectProfile[]): ArchitectProfile[] {
   const source = list?.length ? list : DEFAULT_ARCHITECTS;
   const defaultArchMap = new Map(DEFAULT_ARCHITECTS.map((a) => [a.id, a]));
-  return source.map((arch) => {
-    const isLawrence = /lawrence/i.test(arch.name);
+  return source.map((arch, idx) => {
+    const isLawrence = idx === 3 || /lawrence/i.test(arch.name);
     return {
       ...arch,
-      name: isLawrence ? 'Lawrence S. Beraquit' : arch.name,
+      name: isLawrence ? 'AR. LAWRENCE S. BERAQUIT' : arch.name,
       headshot: isLawrence
         ? LAWRENCE_HEADSHOT
         : arch.headshot || defaultArchMap.get(arch.id)?.headshot || HERO_IMAGE
@@ -246,9 +247,9 @@ function loadSavedSiteData(): PersistedSiteData {
     if (!raw) {
       return {
         siteCopy: DEFAULT_SITE_COPY,
-        metrics: DEFAULT_METRICS,
+        metrics: normalizeMetrics(DEFAULT_METRICS),
         projects: DEFAULT_PROJECTS,
-        architects: DEFAULT_ARCHITECTS
+        architects: normalizeArchitects()
       };
     }
     const parsed = JSON.parse(raw) as Partial<PersistedSiteData>;
@@ -271,9 +272,9 @@ function loadSavedSiteData(): PersistedSiteData {
   } catch {
     return {
       siteCopy: DEFAULT_SITE_COPY,
-      metrics: DEFAULT_METRICS,
+      metrics: normalizeMetrics(DEFAULT_METRICS),
       projects: DEFAULT_PROJECTS,
-      architects: DEFAULT_ARCHITECTS
+      architects: normalizeArchitects()
     };
   }
 }
@@ -515,9 +516,9 @@ export default function App() {
 
       if (mediaUrlMap.size > 0) {
         setArchitects((prev) =>
-          prev.map((arch) => {
-            if (/lawrence/i.test(arch.name)) {
-              return { ...arch, name: 'Lawrence S. Beraquit', headshot: LAWRENCE_HEADSHOT };
+          prev.map((arch, idx) => {
+            if (idx === 3 || /lawrence/i.test(arch.name)) {
+              return { ...arch, name: 'AR. LAWRENCE S. BERAQUIT', headshot: LAWRENCE_HEADSHOT };
             }
             const customUrl = mediaUrlMap.get(`architect-${arch.id}`);
             return customUrl ? { ...arch, headshot: customUrl } : arch;

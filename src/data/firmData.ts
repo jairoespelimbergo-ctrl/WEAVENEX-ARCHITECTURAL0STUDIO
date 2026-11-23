@@ -40,7 +40,7 @@ export const PROJECTS: ProjectItem[] = [
   {
     id: 'kestrel-civic-citadel',
     title: 'Bendo Group of Companies',
-    location: 'Makati, PH',
+    location: 'Lake Kawaguchiko, Yamanashi Japan',
     year: '2025',
     area: '14,800 m²',
     materials: 'Board-Formed Concrete · Oxidized Corten Steel',
@@ -69,7 +69,7 @@ export const PROJECTS: ProjectItem[] = [
   {
     id: 'basalt-point-residence',
     title: 'Mizu no Wa',
-    location: 'Tagaytay, PH',
+    location: 'Tagaytay City, PH',
     year: '2024',
     area: '640 m²',
     materials: 'Cast-in-Place Basalt Concrete · Blackened Steel',
@@ -253,7 +253,7 @@ export const ARCHITECTS: ArchitectProfile[] = [
   {
     id: 'dante-moretti',
     index: '04',
-    name: 'Dante Moretti',
+    name: 'AR. LAWRENCE S. BERAQUIT',
     initials: 'DM',
     headshot: '/src/assets/images/architect_dante_moretti_1795021529187.jpg',
     role: 'Structural Principal',

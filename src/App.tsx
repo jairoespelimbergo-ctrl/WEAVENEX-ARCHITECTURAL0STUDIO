@@ -20,7 +20,6 @@ import {
 import { compressImageToDataUrl } from './utils/imageCompress';
 import {
   MAX_CLOUD_VIDEO_BYTES,
-  decodeBase64Chunk,
   encodeBlobChunk,
   getBlobChunkCount,
   runWithConcurrency
@@ -33,6 +32,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CloudUpload,
+  Download,
   Eye,
   Link2,
   Lock,
@@ -419,16 +419,61 @@ export default function App() {
     const createdUrls: string[] = [];
 
     async function hydrateAll() {
-      // 1. Load live published siteConfig from Firestore
-      let cloudVideoMeta: WalkthroughVideoMeta | null = null;
+      const mediaUrlMap = new Map<string, string>();
       let loadedProjects = initialData.projects;
       let loadedArchitects = initialData.architects;
+      let snapshotUpdatedAt = 0;
 
+      // 0. Load static /weavenex-site-data.json snapshot if bundled in public/ (zero quota, always works on Cloudflare/Netlify)
+      try {
+        const res = await fetch('/weavenex-site-data.json', { cache: 'no-store' });
+        if (res.ok) {
+          const snapData = (await res.json()) as Partial<PersistedSiteData> & {
+            exportedAt?: number;
+            media?: Record<string, string>;
+          };
+          if (typeof snapData.exportedAt === 'number') {
+            snapshotUpdatedAt = snapData.exportedAt;
+          }
+          if (snapData.siteCopy) {
+            const mergedCopy = { ...DEFAULT_SITE_COPY, ...snapData.siteCopy };
+            if (!mergedCopy.walkthroughVideoUrl?.trim()) {
+              mergedCopy.walkthroughVideoUrl = DEFAULT_SITE_COPY.walkthroughVideoUrl;
+            }
+            if (mergedCopy.heroManifesto.includes('established in 2026')) {
+              mergedCopy.heroManifesto = WEAVENEX_MANIFESTO;
+            }
+            setSiteCopy(mergedCopy);
+          }
+          if (snapData.metrics?.length) setMetrics(normalizeMetrics(snapData.metrics));
+          if (snapData.projects?.length) {
+            loadedProjects = migrateProjects(snapData.projects);
+            setProjects(loadedProjects);
+          }
+          if (snapData.architects?.length) {
+            loadedArchitects = normalizeArchitects(snapData.architects);
+            setArchitects(loadedArchitects);
+          }
+          if (snapData.media) {
+            Object.entries(snapData.media).forEach(([id, dataUrl]) => {
+              if (!dataUrl) return;
+              mediaUrlMap.set(id, dataUrl);
+            });
+          }
+        }
+      } catch {
+        // Optional static snapshot not bundled
+      }
+
+      // 1. Load live published siteConfig from Firestore (only apply if newer than bundled snapshot)
+      let shouldFetchFirestoreMedia = false;
       try {
         const configSnap = await getDoc(doc(db, 'siteConfig', 'main'));
         if (configSnap.exists()) {
-          const data = configSnap.data() as { payload?: string };
-          if (data.payload) {
+          const data = configSnap.data() as { payload?: string; updatedAt?: number };
+          const cloudUpdatedAt = typeof data.updatedAt === 'number' ? data.updatedAt : 0;
+          if (data.payload && (snapshotUpdatedAt === 0 || cloudUpdatedAt > snapshotUpdatedAt)) {
+            shouldFetchFirestoreMedia = true;
             const parsed = JSON.parse(data.payload) as Partial<PersistedSiteData>;
             if (parsed.siteCopy) {
               const mergedCopy = { ...DEFAULT_SITE_COPY, ...parsed.siteCopy };
@@ -461,7 +506,6 @@ export default function App() {
               setArchitects(loadedArchitects);
             }
             if (parsed.walkthroughVideoMeta) {
-              cloudVideoMeta = parsed.walkthroughVideoMeta;
               publishedVideoMetaRef.current = parsed.walkthroughVideoMeta;
             }
           }
@@ -470,47 +514,45 @@ export default function App() {
         console.warn('Could not load published siteConfig from Firestore:', err);
       }
 
-      // 2. Fetch published image media docs by ID so images load instantly without waiting for video chunks
-      const mediaUrlMap = new Map<string, string>();
-      const imageDocIds: string[] = ['firm-logo', 'firm-background'];
-      loadedArchitects.forEach((arch) => imageDocIds.push(`architect-${arch.id}`));
-      loadedProjects.forEach((proj) => {
-        proj.shots.forEach((_, idx) => imageDocIds.push(`project-${proj.id}-shot-${idx}`));
-      });
-
-      try {
-        const snaps = await Promise.all(
-          imageDocIds.map((id) => getDoc(doc(db, 'siteMedia', id)).catch(() => null))
-        );
-        snaps.forEach((snap) => {
-          if (!snap || !snap.exists()) return;
-          const d = snap.data() as { dataUrl?: string; name?: string; type?: string };
-          if (!d.dataUrl) return;
-          mediaUrlMap.set(snap.id, d.dataUrl);
-          if (snap.id === 'firm-logo') {
-            setLogoMedia(DEFAULT_LOGO_MEDIA);
-          } else if (snap.id === 'firm-background') {
-            setBgMedia(DEFAULT_PERSPECTIVE_MEDIA);
-          }
+      // 2. Fetch published image media docs by ID only when Firestore config was applied
+      if (shouldFetchFirestoreMedia) {
+        const imageDocIds: string[] = ['firm-logo', 'firm-background'];
+        loadedArchitects.forEach((arch) => imageDocIds.push(`architect-${arch.id}`));
+        loadedProjects.forEach((proj) => {
+          proj.shots.forEach((_, idx) => imageDocIds.push(`project-${proj.id}-shot-${idx}`));
         });
-      } catch (err) {
-        console.warn('Could not load published siteMedia images from Firestore:', err);
+
+        try {
+          const snaps = await Promise.all(
+            imageDocIds.map((id) => getDoc(doc(db, 'siteMedia', id)).catch(() => null))
+          );
+          snaps.forEach((snap) => {
+            if (!snap || !snap.exists()) return;
+            const d = snap.data() as { dataUrl?: string; name?: string; type?: string };
+            if (!d.dataUrl) return;
+            mediaUrlMap.set(snap.id, d.dataUrl);
+            if (snap.id === 'firm-logo') {
+              setLogoMedia(DEFAULT_LOGO_MEDIA);
+            } else if (snap.id === 'firm-background') {
+              setBgMedia(DEFAULT_PERSPECTIVE_MEDIA);
+            }
+          });
+        } catch (err) {
+          console.warn('Could not load published siteMedia images from Firestore:', err);
+        }
       }
 
-      // 3. Overlay local IndexedDB assets (for unpublished local uploads & instant local video playback)
-      let hasLocalVideo = false;
+      // 3. Overlay local IndexedDB assets (for unpublished local uploads on admin device)
       try {
         const allAssets = await getAllMediaAssets();
         for (const asset of allAssets) {
+          if (asset.id === 'firm-walkthrough') continue;
           const url = URL.createObjectURL(asset.blob);
           createdUrls.push(url);
           mediaUrlMap.set(asset.id, url);
 
           if (asset.id === 'firm-logo') {
             setLogoMedia({ url, name: asset.name, size: asset.size, type: asset.type });
-          } else if (asset.id === 'firm-walkthrough') {
-            hasLocalVideo = true;
-            setVideoMedia({ url, name: asset.name, size: asset.size, type: asset.type });
           } else if (asset.id === 'firm-background') {
             setBgMedia({ url, name: asset.name, size: asset.size, type: asset.type });
           }
@@ -541,52 +583,8 @@ export default function App() {
         );
       }
 
-      // Reveal the live edited website immediately once config & images are hydrated (before background video streaming)
+      // Reveal the live edited website immediately once config & images are hydrated
       setIsHydratingCloud(false);
-
-      // 4. Stream published walkthrough video chunks with 16 concurrent workers (up to 260 MB) for public visitors
-      if (!hasLocalVideo && cloudVideoMeta && cloudVideoMeta.chunkCount > 0) {
-        const meta = cloudVideoMeta;
-        setVideoLoadingProgress(0);
-        try {
-          const orderedParts: BlobPart[] = new Array(meta.chunkCount);
-          let complete = true;
-
-          await runWithConcurrency(
-            meta.chunkCount,
-            16,
-            async (idx) => {
-              if (!complete) return;
-              const snap = await getDoc(doc(db, 'siteMedia', `firm-walkthrough-chunk-${idx}`));
-              const d = snap.exists() ? (snap.data() as { dataUrl?: string }) : null;
-              if (!d?.dataUrl) {
-                complete = false;
-                return;
-              }
-              orderedParts[idx] = decodeBase64Chunk(d.dataUrl);
-            },
-            (done, total) => {
-              setVideoLoadingProgress(Math.min(100, Math.round((done / total) * 100)));
-            }
-          );
-
-          if (complete) {
-            const blob = new Blob(orderedParts, { type: meta.type || 'video/mp4' });
-            const url = URL.createObjectURL(blob);
-            createdUrls.push(url);
-            setVideoMedia({
-              url,
-              name: meta.name,
-              size: meta.size,
-              type: meta.type
-            });
-          }
-        } catch (err) {
-          console.warn('Could not load published walkthrough video chunks:', err);
-        } finally {
-          setVideoLoadingProgress(null);
-        }
-      }
     }
 
     hydrateAll();
@@ -895,6 +893,64 @@ export default function App() {
       const msg = error instanceof Error ? error.message : 'Unknown error';
       console.error('Publish failed:', error);
       setPublishStatus(`Publish failed: ${msg.slice(0, 60)}`);
+    } finally {
+      setPublishingLive(false);
+    }
+  };
+
+  const handleExportSiteData = async () => {
+    setPublishingLive(true);
+    setPublishStatus('Exporting backup...');
+    try {
+      const localAssets = await getAllMediaAssets();
+      const media: Record<string, string> = {};
+      for (const asset of localAssets) {
+        if (!asset.type.startsWith('image/')) continue;
+        try {
+          const maxDim = asset.id === 'firm-logo' ? 800 : 1200;
+          const dataUrl = await compressImageToDataUrl(asset.blob, maxDim, 0.82);
+          media[asset.id] = dataUrl;
+        } catch {
+          // Skip invalid image
+        }
+      }
+
+      const cleanProjects = projects.map((p) => ({
+        ...p,
+        image: p.image.startsWith('blob:') ? '' : p.image,
+        shots: p.shots.map((s) => ({
+          ...s,
+          url: s.url.startsWith('blob:') ? '' : s.url
+        }))
+      }));
+      const cleanArchitects = architects.map((a) => ({
+        ...a,
+        headshot: a.headshot.startsWith('blob:') ? '' : a.headshot
+      }));
+
+      const exportObj = {
+        exportedAt: Date.now(),
+        siteCopy,
+        metrics,
+        projects: cleanProjects,
+        architects: cleanArchitects,
+        media
+      };
+
+      const blob = new Blob([JSON.stringify(exportObj, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'weavenex-site-data.json';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      setPublishStatus('Downloaded weavenex-site-data.json!');
+      window.setTimeout(() => setPublishStatus(null), 5000);
+    } catch {
+      setPublishStatus('Export failed');
     } finally {
       setPublishingLive(false);
     }
@@ -1742,6 +1798,16 @@ export default function App() {
             >
               <CloudUpload className="h-3.5 w-3.5" />
               {publishingLive ? (publishStatus || 'Publishing...') : 'Publish Changes Live'}
+            </button>
+            <button
+              type="button"
+              disabled={publishingLive}
+              onClick={handleExportSiteData}
+              title="Download all edited text & photos as weavenex-site-data.json for Cloudflare/GitHub"
+              className="inline-flex items-center gap-1.5 border border-[#2A2E35] bg-[#0B0C0E] px-3 py-2 text-xs font-medium text-[#F4F4F2] transition-colors hover:border-[#D9381E] cursor-pointer whitespace-nowrap disabled:opacity-60"
+            >
+              <Download className="h-3.5 w-3.5 text-[#D9381E]" />
+              Export Backup
             </button>
             <button
               type="button"

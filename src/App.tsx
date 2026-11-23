@@ -404,6 +404,11 @@ export default function App() {
       setAuthUser(user);
       if (!user || user.email?.toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
         setEditMode(false);
+      } else if (
+        new URLSearchParams(window.location.search).get('admin') === '1'
+      ) {
+        setEditMode(true);
+        setAdminModalOpen(false);
       }
     });
     return () => unsubscribe();
@@ -740,8 +745,17 @@ export default function App() {
         await signOut(auth);
         setAdminError(`Access denied. Only ${ADMIN_EMAIL} can edit this website.`);
       }
-    } catch {
-      setAdminError('Google Sign-In was cancelled or blocked. Please try again.');
+    } catch (err) {
+      const code = (err as { code?: string })?.code ?? '';
+      if (code === 'auth/unauthorized-domain') {
+        setAdminError(
+          `Add "${window.location.hostname}" to Firebase Console → Authentication → Settings → Authorized domains.`
+        );
+      } else if (code === 'auth/popup-blocked') {
+        setAdminError('Sign-in popup was blocked by your browser. Please allow popups and try again.');
+      } else {
+        setAdminError('Google Sign-In was cancelled or blocked. Please try again.');
+      }
     }
   };
 
@@ -1699,6 +1713,17 @@ export default function App() {
               >
                 © {new Date().getFullYear()} {siteCopy.firmName}
               </span>
+              {!isAdminUnlocked && (
+                <button
+                  type="button"
+                  onClick={() => setAdminModalOpen(true)}
+                  aria-label="Studio Admin Unlock"
+                  title="Studio Admin Sign-In"
+                  className="inline-flex items-center justify-center p-1 text-[#4B5563] transition-colors hover:text-[#9CA3AF] cursor-pointer"
+                >
+                  <Lock className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
           </div>
         </footer>
